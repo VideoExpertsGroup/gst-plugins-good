@@ -82,7 +82,8 @@ static GstStaticPadTemplate video_src_template =
     GST_STATIC_CAPS ("video/x-flash-video, flvversion=(int) 1; "
         "video/x-flash-screen; "
         "video/x-vp6-flash; " "video/x-vp6-alpha; "
-        "video/x-h264, stream-format=avc;")
+        "video/x-h264, stream-format=avc; "
+        "video/x-h265, stream-format=hvc1;")
     );
 
 GST_DEBUG_CATEGORY_STATIC (flvdemux_debug);
@@ -1455,10 +1456,11 @@ static GstFlowReturn
 gst_flv_demux_parse_tag_video (GstFlvDemux * demux, GstBuffer * buffer)
 {
   GstFlowReturn ret = GST_FLOW_OK;
-  guint32 dts = 0, codec_data = 1, dts_ext = 0;
+  guint32 dts = 0, codec_data = 1, dts_ext = 0, fourcc = 0;
   gint32 cts = 0;
   gboolean keyframe = FALSE;
-  guint8 flags = 0, codec_tag = 0;
+  gboolean is_ex_header = FALSE;
+  guint8 flags = 0, codec_tag = 0, packet_type = 0;
   GstBuffer *outbuf;
   GstMapInfo map;
   guint8 *data;
@@ -1502,12 +1504,25 @@ gst_flv_demux_parse_tag_video (GstFlvDemux * demux, GstBuffer * buffer)
   /* Skip the stream id and go directly to the flags */
   flags = GST_READ_UINT8 (data + 7);
 
+  if (flags & 0x80) {
+    is_ex_header = TRUE;
+  }
+
   /* Keyframe */
-  if ((flags >> 4) == 1) {
+  if ((flags >> 4) == 1 || (is_ex_header && (flags & 0x70) == 1)) {
     keyframe = TRUE;
   }
   /* Codec tag */
-  codec_tag = flags & 0x0F;
+  if (is_ex_header) {
+    packet_type = flags & 0x0F;
+    fourcc = GST_READ_UINT24_BE (data + 8);
+  } else {
+    codec_tag = flags & 0x0F;
+  }
+
+  GST_LOG_OBJECT (demux, "data 4-7: %02X %02X %02X %02X codec_tag: (%d), fourcc: (%d)",
+      data[4], data[5], data[6], data[7], codec_tag, fourcc);
+
   if (codec_tag == 4 || codec_tag == 5) {
     codec_data = 2;
   } else if (codec_tag == 7) {
