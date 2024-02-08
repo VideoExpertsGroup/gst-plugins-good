@@ -1368,6 +1368,14 @@ gst_flv_demux_video_negotiate (GstFlvDemux * demux, guint32 codec_tag)
           gst_caps_new_simple ("video/mpeg", "mpegversion", G_TYPE_INT, 4,
           "systemstream", G_TYPE_BOOLEAN, FALSE, NULL);
       break;
+    case 10:
+      if (!demux->video_codec_data) {
+        GST_DEBUG_OBJECT (demux, "don't have h265 codec data yet");
+        ret = TRUE;
+        goto done;
+      }
+      caps = gst_caps_new_simple ("video/x-h265", "stream-format", G_TYPE_STRING, "hvc1", NULL);
+      break;
     default:
       GST_WARNING_OBJECT (demux, "unsupported video codec tag %u", codec_tag);
   }
@@ -1509,19 +1517,25 @@ gst_flv_demux_parse_tag_video (GstFlvDemux * demux, GstBuffer * buffer)
   }
 
   /* Keyframe */
-  if ((flags >> 4) == 1 || (is_ex_header && (flags & 0x70) == 1)) {
+  if ((flags >> 4) == 1 || (is_ex_header && ((flags & 0x70) >> 4) == 1)) {
     keyframe = TRUE;
   }
   /* Codec tag */
   if (is_ex_header) {
     packet_type = flags & 0x0F;
-    fourcc = GST_READ_UINT24_BE (data + 8);
+    fourcc = GST_READ_UINT32_BE (data + 8);
+    /* Let's untill reserv codec_tag == 10 for H.265
+    (in the futer we need to use fourcc for split)*/
+    codec_tag = 10;
   } else {
     codec_tag = flags & 0x0F;
   }
 
-  GST_LOG_OBJECT (demux, "data 4-7: %02X %02X %02X %02X codec_tag: (%d), fourcc: (%d)",
-      data[4], data[5], data[6], data[7], codec_tag, fourcc);
+  GST_LOG_OBJECT (demux, "data 4-7: %02X %02X %02X %02X codec_tag: (%d), packet_type: (%d)",
+      data[4], data[5], data[6], data[7], codec_tag, packet_type);
+
+  GST_LOG_OBJECT (demux, "data 8-11: %02X %02X %02X %02X fourcc: (%d)",
+      data[8], data[9], data[10], data[11], fourcc);
 
   if (codec_tag == 4 || codec_tag == 5) {
     codec_data = 2;
