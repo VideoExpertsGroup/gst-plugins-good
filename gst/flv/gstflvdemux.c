@@ -1595,9 +1595,6 @@ gst_flv_demux_parse_tag_video (GstFlvDemux * demux, GstBuffer * buffer)
             GST_BUFFER_COPY_MEMORY, 7 + codec_data,
             demux->tag_data_size - codec_data);
 
-        GST_LOG_OBJECT (demux, "H264 video_codec_data: %s tag_data_size: %d codec_data: %d",
-            demux->video_codec_data, demux->tag_data_size, codec_data);
-
         /* Use that buffer data in the caps */
         if (demux->video_pad)
           gst_flv_demux_video_negotiate (demux, codec_tag);
@@ -1635,9 +1632,6 @@ gst_flv_demux_parse_tag_video (GstFlvDemux * demux, GstBuffer * buffer)
         demux->video_codec_data = gst_buffer_copy_region (buffer,
             GST_BUFFER_COPY_MEMORY, 7 + codec_data,
             demux->tag_data_size - codec_data);
-
-        GST_LOG_OBJECT (demux, "H265 video_codec_data: %s tag_data_size: %d codec_data: %d",
-            demux->video_codec_data, demux->tag_data_size, codec_data);
 
         /* Use that buffer data in the caps */
         if (demux->video_pad)
