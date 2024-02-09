@@ -1368,7 +1368,7 @@ gst_flv_demux_video_negotiate (GstFlvDemux * demux, guint32 codec_tag)
           gst_caps_new_simple ("video/mpeg", "mpegversion", G_TYPE_INT, 4,
           "systemstream", G_TYPE_BOOLEAN, FALSE, NULL);
       break;
-    case 10:
+    case 12:
       if (!demux->video_codec_data) {
         GST_DEBUG_OBJECT (demux, "don't have h265 codec data yet");
         ret = TRUE;
@@ -1526,7 +1526,7 @@ gst_flv_demux_parse_tag_video (GstFlvDemux * demux, GstBuffer * buffer)
     fourcc = GST_READ_UINT32_BE (data + 8);
     /* Let's untill reserv codec_tag == 10 for H.265
     (in the futer we need to use fourcc for split)*/
-    codec_tag = 10;
+    codec_tag = 12;
   } else {
     codec_tag = flags & 0x0F;
   }
@@ -1552,6 +1552,24 @@ gst_flv_demux_parse_tag_video (GstFlvDemux * demux, GstBuffer * buffer)
     }
 
     GST_LOG_OBJECT (demux, "got cts %d", cts);
+  } else if (codec_tag == 12) {
+    codec_data = 5;
+
+    if (packet_type == 1) {
+      /*PacketTypeCodedFrames*/
+      cts = GST_READ_UINT24_BE (data + 12);
+      cts = (cts + 0xff800000) ^ 0xff800000;
+
+      if (cts < 0 && ABS (cts) > dts) {
+        GST_ERROR_OBJECT (demux, "Detected a negative composition time offset "
+            "'%d' that would lead to negative PTS, fixing", cts);
+        cts += ABS (cts) - dts;
+      }
+
+      GST_LOG_OBJECT (demux, "H265 got cts %d", cts);
+    } else if (packet_type == 3) {
+      cts = 0;
+    }
   }
 
   GST_LOG_OBJECT (demux, "video tag with codec tag %u, keyframe (%d) "
@@ -1575,7 +1593,11 @@ gst_flv_demux_parse_tag_video (GstFlvDemux * demux, GstBuffer * buffer)
         }
         demux->video_codec_data = gst_buffer_copy_region (buffer,
             GST_BUFFER_COPY_MEMORY, 7 + codec_data,
-            demux->tag_data_size - codec_data);;
+            demux->tag_data_size - codec_data);
+
+        GST_LOG_OBJECT (demux, "H264 video_codec_data: %s tag_data_size: %d codec_data: %d",
+            demux->video_codec_data, demux->tag_data_size, codec_data);
+
         /* Use that buffer data in the caps */
         if (demux->video_pad)
           gst_flv_demux_video_negotiate (demux, codec_tag);
@@ -1593,6 +1615,47 @@ gst_flv_demux_parse_tag_video (GstFlvDemux * demux, GstBuffer * buffer)
       default:
         GST_WARNING_OBJECT (demux, "invalid video packet type %u",
             avc_packet_type);
+    }
+  }
+
+  if (codec_tag == 12) {
+    switch (packet_type) {
+      case 0:
+      {
+        if (demux->tag_data_size < codec_data) {
+          GST_ERROR_OBJECT (demux, "Got invalid H.265 codec, ignoring.");
+          break;
+        }
+
+        /* HEVCDecoderConfigurationRecord data */
+        GST_LOG_OBJECT (demux, "got an H.265 codec data packet");
+        if (demux->video_codec_data) {
+          gst_buffer_unref (demux->video_codec_data);
+        }
+        demux->video_codec_data = gst_buffer_copy_region (buffer,
+            GST_BUFFER_COPY_MEMORY, 7 + codec_data,
+            demux->tag_data_size - codec_data);
+
+        GST_LOG_OBJECT (demux, "H265 video_codec_data: %s tag_data_size: %d codec_data: %d",
+            demux->video_codec_data, demux->tag_data_size, codec_data);
+
+        /* Use that buffer data in the caps */
+        if (demux->video_pad)
+          gst_flv_demux_video_negotiate (demux, codec_tag);
+        goto beach;
+      }
+      case 1:
+      case 3:
+        /* H.265 NALU packet */
+        if (!demux->video_codec_data) {
+          GST_ERROR_OBJECT (demux, "got H.265 video packet before codec data");
+          ret = GST_FLOW_OK;
+          goto beach;
+        }
+        GST_LOG_OBJECT (demux, "got a H.265 NALU video packet");
+        break;
+      default:
+        GST_WARNING_OBJECT (demux, "invalid video packet type %u", packet_type);
     }
   }
 
